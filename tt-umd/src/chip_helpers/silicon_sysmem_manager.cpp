@@ -169,7 +169,8 @@ SiliconSysmemManager::~SiliconSysmemManager() { SiliconSysmemManager::unpin_or_u
 
 bool SiliconSysmemManager::init_sysmem(uint32_t num_host_mem_channels) {
     ZoneScopedC(tracy::Color::Yellow);
-    // Checked before the IOMMU: translation does not make DMA cache-coherent.
+    // Checked before the IOMMU: translation does not make DMA cache-coherent. Non-coherent hosts with usable cache
+    // maintenance keep cacheable sysmem (host_cache keeps it coherent); the rest use the uncached KMD buffer.
     if (pci_device_->uses_uncached_sysmem()) {
         return init_kmd_dma(num_host_mem_channels);
     } else if (pci_device_->is_iommu_enabled()) {

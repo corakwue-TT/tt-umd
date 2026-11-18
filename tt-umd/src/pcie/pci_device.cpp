@@ -4,6 +4,10 @@
 
 #include "tt-umd/pcie/pci_device.hpp"
 
+#include <string_view>
+
+#include "tt-umd/chip_helpers/host_cache.hpp"
+
 #include <fcntl.h>  // for ::open
 #include <fmt/format.h>
 #include <sys/mman.h>     // for mmap, munmap
@@ -457,7 +461,13 @@ void PCIDevice::construct_resources() {
         kmd_version.to_string(),
         driver_api_version,
         iommu_enabled ? "enabled" : "disabled",
-        is_dma_coherent() ? "coherent" : "non-coherent");
+        is_dma_coherent() ? "coherent"
+        : uses_host_cache_maintenance() ? "non-coherent (cache maintenance)"
+                                        : "non-coherent (uncached sysmem)");
+
+    // The KMD's report is the source of truth for whether maintenance runs; host_cache falls back to its own
+    // device-tree check only if no device was opened.
+    host_cache::configure(is_dma_coherent(), uses_host_cache_maintenance());
 
     UMD_ASSERT(
         arch != tt::ARCH::WORMHOLE_B0 || revision == 0x01, error::RuntimeError, "Wormhole B0 must have revision 0x01");
@@ -1035,11 +1045,22 @@ bool PCIDevice::is_dma_coherent() const {
     return !info.dma_noncoherent;
 }
 
-bool PCIDevice::uses_uncached_sysmem() const {
-    // Single policy point for non-coherent hosts. Without host cache maintenance the uncached KMD buffer is the only
-    // safe sysmem; a cache-maintenance path would make this false where it is usable.
-    return !is_dma_coherent();
+bool PCIDevice::uses_host_cache_maintenance() const {
+    if (is_dma_coherent()) {
+        return false;
+    }
+    const char *env = std::getenv("TT_UMD_NONCOHERENT_MODE");
+    const std::string_view mode = (env != nullptr) ? env : "";
+    if (mode == "uncached") {
+        return false;
+    }
+    if (mode == "cmo" && !host_cache::cbo_usable()) {
+        log_warning(LogUMD, "TT_UMD_NONCOHERENT_MODE=cmo, but no usable cache-block operations; using uncached sysmem.");
+    }
+    return host_cache::cbo_usable();
 }
+
+bool PCIDevice::uses_uncached_sysmem() const { return !is_dma_coherent() && !uses_host_cache_maintenance(); }
 
 std::tuple<void *, uint64_t, uint64_t> PCIDevice::allocate_noc_dma_buffer(size_t size, uint8_t buf_index) {
     void *mapping = nullptr;

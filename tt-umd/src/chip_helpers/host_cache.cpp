@@ -118,18 +118,33 @@ struct Decision {
 
 // Resolved on first use rather than at load time: the probe costs a syscall and a sysfs walk, and a
 // process that links UMD without ever touching sysmem should not pay for them.
-const Decision& decision() {
+const CboInfo& cbo() {
+    static const CboInfo info = probe_cbo();
+    return info;
+}
+
+// Set by configure() from the KMD's coherence report; falls back to the device-tree walk.
+// Written once on device open, before any sysmem access, then only read.
+struct Configured {
+    bool set = false;
+    Decision decision;
+};
+Configured g_configured;
+
+const Decision& detected_decision() {
     static const Decision resolved = [] {
-        const CboInfo cbo = probe_cbo();
+        const CboInfo& info = cbo();
         const bool coherent = platform_is_dma_coherent();
         return Decision{
-            .enabled = cbo.usable && !coherent,
-            .required_but_unavailable = !cbo.usable && !coherent,
-            .block_bytes = cbo.block_bytes,
+            .enabled = info.usable && !coherent,
+            .required_but_unavailable = !info.usable && !coherent,
+            .block_bytes = info.block_bytes,
         };
     }();
     return resolved;
 }
+
+const Decision& decision() { return g_configured.set ? g_configured.decision : detected_decision(); }
 
 }  // namespace
 
@@ -138,6 +153,20 @@ bool available() { return decision().enabled; }
 uint32_t block_bytes() { return decision().block_bytes; }
 
 bool maintenance_required_but_unavailable() { return decision().required_but_unavailable; }
+
+bool cbo_usable() { return cbo().usable; }
+
+void configure(bool platform_coherent, bool enable_maintenance) {
+    const CboInfo& info = cbo();
+    g_configured.decision = Decision{
+        .enabled = !platform_coherent && enable_maintenance && info.usable,
+        // Not coherent and not maintained is only an error if nothing else covers it; the caller (uncached
+        // sysmem) does, so report it only when maintenance was wanted but cannot run.
+        .required_but_unavailable = !platform_coherent && enable_maintenance && !info.usable,
+        .block_bytes = info.block_bytes,
+    };
+    g_configured.set = true;
+}
 
 }  // namespace tt::umd::host_cache
 

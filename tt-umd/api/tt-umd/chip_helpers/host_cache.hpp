@@ -44,6 +44,14 @@ bool available();
 uint32_t block_bytes();
 bool maintenance_required_but_unavailable();
 
+// Whether Zicbom is usable from user mode (riscv_hwprobe), independent of whether it is needed.
+bool cbo_usable();
+
+// Record the platform's coherence as reported by the KMD (PCIDevice::is_dma_coherent()) and whether
+// maintenance should run. Overrides the device-tree detection in host_cache.cpp, which remains the
+// fallback when nothing is configured. Call before any sysmem access (PCIDevice does, on open).
+void configure(bool platform_coherent, bool enable_maintenance);
+
 namespace detail {
 
 // Emitted under a local `.option arch` so the rest of the build keeps its base -march; Zicbom need
@@ -96,6 +104,10 @@ constexpr bool available() { return false; }
 constexpr uint32_t block_bytes() { return 0; }
 
 constexpr bool maintenance_required_but_unavailable() { return false; }
+
+constexpr bool cbo_usable() { return false; }
+
+inline void configure(bool, bool) {}
 
 namespace detail {
 

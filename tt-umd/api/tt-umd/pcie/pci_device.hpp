@@ -251,10 +251,17 @@ public:
     bool is_dma_coherent() const;
 
     /**
-     * Whether sysmem is the uncached KMD DMA buffer rather than cacheable hugepage/IOMMU memory. Code above UMD that
-     * shares other cacheable host memory with the device (pinned buffers, sockets) should treat that memory as unsafe
-     * when this is true. Today this is exactly !is_dma_coherent(); once host cache maintenance is available it is true
-     * only on non-coherent hosts that cannot maintain caches from user space.
+     * Policy for DMA-non-coherent hosts. True: sysmem stays cacheable (hugepage/IOMMU) and UMD keeps it coherent with
+     * explicit cache maintenance (tt::umd::host_cache, Zicbom on riscv64). False: sysmem is the uncached KMD buffer.
+     * Default (TT_UMD_NONCOHERENT_MODE unset or "auto"): maintenance when the ISA supports it from user mode.
+     * TT_UMD_NONCOHERENT_MODE=cmo|uncached forces either. Always false on coherent hosts.
+     */
+    bool uses_host_cache_maintenance() const;
+
+    /**
+     * Whether sysmem is the uncached KMD DMA buffer rather than cacheable hugepage/IOMMU memory: a non-coherent host
+     * without usable host cache maintenance. Code above UMD that shares other cacheable host memory with the device
+     * (pinned buffers, sockets) should treat that memory as unsafe when this is true.
      */
     bool uses_uncached_sysmem() const;
 
